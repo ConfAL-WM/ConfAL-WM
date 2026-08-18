@@ -1,0 +1,278 @@
+# ============================================================================
+# Stage 1：C3 Confidence Probe 训练配置
+# ============================================================================
+#
+# 使用方式（单卡）：
+#   python trainer/train_c3_probe.py \
+#       --evac_ckpt  /share/project/robocoin/hywu/lx/EVAC-C3/checkpoints/EVAC/EnerV_AC_deepspeed_v0.1.pt \
+#       --evac_cfg   configs/agibotworld/train_c3_probe.yaml \
+#       --index      data_index.json \
+#       --output_dir logs/c3_probe_v1
+#
+# 使用方式（4卡 DDP）：
+#   torchrun --nproc_per_node=4 trainer/train_c3_probe.py \
+#       --evac_ckpt  /share/project/robocoin/hywu/lx/EVAC-C3/checkpoints/EVAC/EnerV_AC_deepspeed_v0.1.pt \
+#       --evac_cfg   configs/agibotworld/train_c3_probe.yaml \
+#       --index      data_index.json \
+#       --output_dir logs/c3_probe_v1
+#
+# 与 train_config.yaml 的主要区别：
+#   1. enable_c3_probe: true  → 实例化 C3ConfidenceProbe
+#   2. image_proj_model_trainable / traj_prompt_proj_model_trainable: false
+#      → 节省显存（probe 训练不需要这两个 projector 的梯度）
+#   3. base_learning_rate 提高到 3e-4（只训 probe，可用更大 LR）
+#   4. batch_size 降到 2（UNet 完整前向仍然占用大量显存）
+#   5. max_steps 降到 30000（probe 收敛比全模型训练快得多）
+#   6. 数据集切换为 Challenge flat 格式（AgiBotWorldICRA26Challenge）
+#   7. 移除 batch_logger（probe 训练阶段不做 DDIM 采样可视化）
+# ============================================================================
+
+chunk: 16
+n_previous: 4
+n_view: 1
+
+# ---------------------------------------------------------------------------
+# 数据索引（由 prepare_data.py 生成）
+# 由 train_c3_probe.py 的 --index 参数读取，此处仅供记录
+# ---------------------------------------------------------------------------
+data_index: data_index.json
+
+model:
+
+  pretrained_checkpoint: /share/project/robocoin/hywu/lx/EVAC-C3/checkpoints/EVAC/EnerV_AC_deepspeed_v0.1.pt
+
+  auto_padzero_input_block: False
+  auto_padrand_input_block: False
+
+  # probe 训练只需要更新 C3ConfidenceProbe 参数，LR 可以更大
+  base_learning_rate: 3e-4
+  scale_lr: False
+  target: evac.lvdm.models.ddpm3d.ACWMLatentDiffusion
+  params:
+    rescale_betas_zero_snr: True
+    parameterization: "v"
+    linear_start: 0.00085
+    linear_end: 0.012
+    num_timesteps_cond: 1
+    log_every_t: 20
+    timesteps: 1000
+    first_stage_key: ["video", "traj"]
+    cond_stage_key: delta_action
+    cond_stage_trainable: False
+
+    # ── 冻结所有非 probe 组件 ─────────────────────────────────────────────
+    freeze_embedder: True          # CLIP image embedder 保持冻结
+    image_proj_model_trainable: False     # 不训练 image proj（节省显存）
+    traj_prompt_proj_model_trainable: False  # 不训练 traj proj
+
+    conditioning_key: hybrid
+    image_size: [40, 64]
+    channels: 4
+    scale_by_std: False
+    scale_factor: 0.18215
+    use_ema: False
+    uncond_prob: 0.1
+    uncond_type: 'zero_embed'
+    rand_cond_frame: true
+    use_dynamic_rescale: true
+    base_scale: 0.7
+    fps_condition_type: 'fps'
+    perframe_ae: True
+    ae_batch_size: 2
+    chunk: ${chunk}
+    n_view: ${n_view}
+
+    use_raymap_dir: True
+    use_raymap_origin: True
+    use_cat_mask: True
+
+    sparse_memory: True
+    ddim_num_chunk: 1
+    views_name_wo_imgcat: ["left_hand", "right_hand"]
+
+    # ── C3 Confidence Probe ───────────────────────────────────────────────
+    enable_c3_probe: true
+    c3_probe_config:
+      mid_channels: 1280       # UNet middle_block 输出通道（固定）
+      dec_channels: 1280       # UNet 第一层 decoder 上采样输出通道（固定）
+      emb_dim: 1280            # UNet time+fps+domain embedding 维度（固定）
+      probe_dim: 256           # probe 内部特征维度
+      n_heads: 4               # Transformer attention 头数
+      n_spatial_layers: 3      # 空间 Transformer 层数
+      n_temporal_layers: 3     # 时间 Transformer 层数
+      max_h: 20                # 空间位置编码最大高度（EVAC 输出 10，留余量）
+      max_w: 32                # 空间位置编码最大宽度（EVAC 输出 16，留余量）
+      max_T: 32                # 时间位置编码最大帧数
+      # ★ 这两个值是绝对 MAE 阈值，必须手动对齐实际误差分布 ★
+      # 操作步骤：先以任意初始值启动训练，观察前 100 步日志打印的 mae_p10 / mae_p90，
+      # 然后将 threshold_low 设为 mae_p10 附近，threshold_high 设为 mae_p90 附近，
+      # 重新训练。目标：label_mean 稳定在 0.3~0.7 之间。
+      threshold_low: 0.35      # 初始占位值，需根据 mae_p10 日志手动替换
+      threshold_high: 0.85     # 初始占位值，需根据 mae_p90 日志手动替换
+      dropout: 0.1             # Transformer dropout，防止 probe 过拟合训练集
+
+    unet_config:
+      target: evac.lvdm.modules.networks.openaimodel3dcausal.UNetModel
+      params:
+        in_channels: 19
+        out_channels: 4
+        model_channels: 320
+        attention_resolutions:
+        - 4
+        - 2
+        - 1
+        num_res_blocks: 2
+        channel_mult:
+        - 1
+        - 2
+        - 4
+        - 4
+        dropout: 0.1
+        num_head_channels: 64
+        transformer_depth: 1
+        context_dim: 1024
+        use_linear: true
+        use_checkpoint: True       # gradient checkpointing 省显存
+        temporal_conv: True
+        temporal_attention: True
+        temporal_selfatt_only: true
+        temporal_batch_size: -1
+        use_causal_attention: false
+        temporal_length: 20
+        addition_attention: true
+        image_cross_attention: true
+        traj_cross_attention: true
+        default_fs: 30
+        fs_condition: true
+        resblock_updown: false
+        chunk: ${chunk}
+        n_view: ${n_view}
+        causal_temp_conv: true
+        use_block_idx: true
+        use_domain_embedding: true
+        adapt_to_mvt: True
+
+    first_stage_config:
+      target: evac.lvdm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: True
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult:
+          - 1
+          - 2
+          - 4
+          - 4
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    cond_stage_config:
+      target: evac.lvdm.modules.encoders.resampler.Resampler
+      params:
+        dim: 1024
+        depth: 4
+        dim_head: 64
+        heads: 12
+        num_queries: 16
+        embedding_dim: 14
+        output_dim: 1024
+        ff_mult: 4
+
+    img_cond_stage_config:
+      target: evac.lvdm.modules.encoders.condition.FrozenOpenCLIPImageEmbedderV2
+      params:
+        abspath: /share/project/robocoin/hywu/lx/EVAC-C3/checkpoints/CLIP/open_clip_pytorch_model.bin
+        freeze: true
+
+    image_proj_stage_config:
+      target: evac.lvdm.modules.encoders.resampler.Resampler
+      params:
+        dim: 1024
+        depth: 4
+        dim_head: 64
+        heads: 12
+        num_queries: 16
+        embedding_dim: 1280
+        output_dim: 1024
+        ff_mult: 4
+        video_length: 16
+
+# ---------------------------------------------------------------------------
+# 数据集路径（★ 训练前必改 ★）
+#
+# train_c3_probe.py 通过 --index 读取训练数据，通过 --val_root 读取验证数据。
+# 此 data 节供脚本读取 sample_size / chunk / n_previous 等超参使用。
+#
+# 路径说明：
+#   train_root  ← {task_id}-{episode_id}-{segment_id}/ 的父目录（即 train/ 本身）
+#                 例：/data/agibotworld/train
+#   val_root    ← 包含 gt_dataset/ 和 info_dataset/ 的目录
+#                 例：/data/agibotworld/validation
+#                 ProbeValDataset 使用 gt_dataset/video/frame_*.png 作为真实 GT 帧
+# ---------------------------------------------------------------------------
+
+# ★ val_root 路径（可被 --val_root CLI 参数覆盖）
+data:
+  val_root: "/share/project/robocoin/hywu/kyy/datasets/AgiBotWorldChallenge-2026/WorldModel/validation"
+  target: dataset.utils_data.DataModuleFromConfig
+  params:
+    # probe 训练 UNet 完整前向仍占显存，batch_size 比全量训练小
+    batch_size: 2
+    num_workers: 4
+    train:
+      target: dataset.agibotworld_challenge_dataset.AgiBotWorldICRA26Challenge
+      params:
+        # ★ 改成 TRAIN_ROOT 的上一级目录（不含 /train）
+        data_roots: ["/share/project/robocoin/hywu/kyy/datasets/AgiBotWorldChallenge-2026/WorldModel"]
+        domains: ["agibotworld"]
+        split: "train"
+        sample_size: [320, 512]
+        # n_previous(4) + chunk(16) = 20 帧
+        sample_n_frames: 20
+        preprocess: 'resize'
+        valid_cam: 'head'
+        chunk: ${chunk}
+        n_previous: ${n_previous}
+        previous_pick_mode: 'uniform'
+        random_crop: True
+        min_sep: 1
+        max_sep: 3
+    # validation 使用 ProbeValDataset（info_dataset + gt_dataset/video/frame_*.png）
+    # 由 train_c3_probe.py 的 build_val_dataloader() 直接构造，不走 DataModuleFromConfig
+
+# ---------------------------------------------------------------------------
+# Lightning（供参考；train_c3_probe.py 为独立脚本，不读此节）
+# ---------------------------------------------------------------------------
+lightning:
+  precision: 16
+  trainer:
+    benchmark: True
+    accumulate_grad_batches: 1
+    max_steps: 30000          # probe 收敛快，30k step 通常够用
+    log_every_n_steps: 50
+    val_check_interval: 1000
+    gradient_clip_algorithm: 'norm'
+    gradient_clip_val: 1.0    # probe 参数少，梯度较稳定，放宽裁剪
+  callbacks:
+    model_checkpoint:
+      target: pytorch_lightning.callbacks.ModelCheckpoint
+      params:
+        every_n_train_steps: 2000
+        filename: "c3probe-{step}"
+        save_weights_only: True
+    metrics_over_trainsteps_checkpoint:
+      target: pytorch_lightning.callbacks.ModelCheckpoint
+      params:
+        filename: 'c3probe-{step}'
+        save_weights_only: True
+        every_n_train_steps: 5000
+    # batch_logger 已移除：probe 训练阶段不做 DDIM 采样可视化

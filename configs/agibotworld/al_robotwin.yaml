@@ -1,0 +1,253 @@
+# ConfAL-WM RoboTwin external active learning config.
+# RoboTwin2.0 data via external_worldmodel format.
+#
+# Main path: warm up EVAC on the C3 train split, quickly prescreen one/few
+# representative scene(s) per RoboTwin task, then run expensive EVAC+C3
+# detailed scoring only on the selected subset.
+#
+# Step 0: Convert data
+#   python al_pipeline/external_datasets/robotwin_converter.py \
+#     --raw_root datasets/RoboTwin2.0/dataset \
+#     --converted_root datasets/RoboTwin2.0/aloha-agilex_rand_500 \
+#     --robot aloha-agilex --variant randomized_500 --min_frames 4 --workers 8
+#
+# Step 1: Build splits
+#   python al_pipeline/build_external_al_splits.py --config configs/agibotworld/al_robotwin.yaml
+#
+# Step 2: Warm up EVAC v1 on score_method_train_split
+#   python trainer/train_evac_with_al.py --config configs/agibotworld/al_robotwin.yaml --stage warmup --weighting none
+#
+# Step 3: Fill model.evac_v1_checkpoint with the warmup checkpoint path.
+#
+# Step 4: Task-level prescreen build + score with EVAC v1
+#   python al_pipeline/selection.py build --config configs/agibotworld/al_robotwin.yaml
+#   # optional: --representatives-per-task 3/5, default task_prescreen.representatives_per_task=1
+#   python al_pipeline/score_pool.py --config configs/agibotworld/al_robotwin.yaml \
+#     --score_method c3
+#   # Output layout (prediction & scoring are separated):
+#   #   EVAC predictions/cache:  al_runs/robotwin_al/pool_scores/pred/task_prescreen
+#   #   C3 scores:               al_runs/robotwin_al/pool_scores/c3_task_prescreen_scores
+#
+# Step 5: Allocate per-task budgets, sample raw randomized scenes, and detailed-score only the selected subset
+#   python al_pipeline/selection.py select --config configs/agibotworld/al_robotwin.yaml \
+#     --score_method c3 --select_method tail_risk
+#   python al_pipeline/score_pool.py --config configs/agibotworld/al_robotwin.yaml \
+#     --score_method c3 --select_method tail_risk
+#   # Output layout (prediction & scoring are separated):
+#   #   EVAC predictions/cache:  al_runs/robotwin_al/pool_scores/pred/c3_tail_risk_selected
+#   #   C3 scores:               al_runs/robotwin_al/pool_scores/c3_tail_risk_selected_scores
+#
+# Step 6: Finalize selected.json + fine-tune EVAC v2
+#   python al_pipeline/selection.py finalize --config configs/agibotworld/al_robotwin.yaml \
+#     --score_method c3 --select_method tail_risk
+#   # Optional anti-forgetting replay:
+#   #   add --include_c3_train_split here and in train_evac_with_al.py below.
+#   python trainer/train_evac_with_al.py --config configs/agibotworld/al_robotwin.yaml \
+#     --stage selected --score_method c3 --select_method tail_risk --weighting frame_patch
+
+seed: 42
+
+run:
+  name: robotwin_al
+  root: al_runs
+
+phase:
+  name: robotwin_external_al
+  protocol: external_active_fine_tuning
+  dataset: robotwin
+
+ewmbench:
+  repo: third_party/EWMBench
+  # Absolute path to the python executable of a dedicated EWMBench conda env
+  # (see README). Leave empty to fall back to the current environment.
+  python: ""
+  dimensions: [psnr, ssim, scene_consistency, trajectory_consistency, semantics, diversity]
+  decode_video_files: true
+  use_official_evaluate_py: false
+
+datasets:
+  robotwin:
+    name: robotwin
+    raw_root: datasets/RoboTwin2.0/dataset
+    converted_root: datasets/RoboTwin2.0/aloha-agilex_rand_500
+    converted_manifest: datasets/RoboTwin2.0/manifests/all.json
+
+external_split:
+  dataset_name: robotwin
+  converted_manifest: datasets/RoboTwin2.0/manifests/all.json
+  output_dir: al_runs/robotwin_al/manifests
+  mode: episode
+  c3_train_ratio: 0.25
+  candidate_pool_ratio: 0.73
+  val_ratio: 0.01
+  test_ratio: 0.01
+  random_seed: 42
+  max_episodes: null
+
+model:
+  evac_config: configs/agibotworld/train_c3_probe.yaml
+  evac_train_config: configs/agibotworld/train_config_challenge_wm.yaml
+  evac_checkpoint: checkpoints/EVAC/EnerV_AC_deepspeed_v0.1.pt
+  # Fill this after --stage warmup finishes. score_pool.py resolves
+  # checkpoints as: --evac-checkpoint > scoring.evac_checkpoint >
+  # model.evac_v1_checkpoint > model.evac_checkpoint.
+  evac_v1_checkpoint: al_runs/robotwin_al/retrain/evac_v1_warmup/logs/checkpoints/epoch=10-step=2000.ckpt
+  c3_probe_checkpoint: al_runs/robotwin_al/c3_probe/probe_step_006000.pt
+
+c3_probe:
+  trained_split_manifest: al_runs/robotwin_al/manifests/c3_train_split.json
+  train_on_external: false
+  external_checkpoint: al_runs/robotwin_al/c3_probe_external/probe_step_006000.pt
+  allow_seen_pool: false
+
+manifests:
+  score_method_train_split: al_runs/robotwin_al/manifests/c3_train_split.json
+  c3_train_split: al_runs/robotwin_al/manifests/c3_train_split.json
+  candidate_pool: al_runs/robotwin_al/manifests/candidate_pool.json
+
+scoring:
+  candidate_pool_manifest: al_runs/robotwin_al/manifests/candidate_pool.json
+  output_dir: al_runs/robotwin_al/pool_scores
+  # Optional. Leave null for Base EVAC; set to the warmup v1 checkpoint for
+  # RoboTwin task prescreen / selected-only scoring, or pass --evac-checkpoint.
+  evac_checkpoint: null
+  evac_config: configs/agibotworld/train_c3_probe.yaml
+  c3_probe_checkpoint: al_runs/robotwin_al/c3_probe/probe_step_006000.pt
+  external_c3_probe_checkpoint: al_runs/robotwin_al/c3_probe_external/probe_step_006000.pt
+  data_format: external_worldmodel
+  external_action_file: actions_evac.npy
+  external_delta_action_file: actions_delta_evac.npy
+  allow_incompatible_actions_for_debug: false
+  device: cuda:0
+  max_episodes: null
+  n_chunk: -1
+  n_frames_to_generate: auto  # per episode: num_frames - n_previous
+  ddim_steps: 27
+  cfg: 1.0
+  gr: 0.7
+  n_probe_ts: 3
+  probe_ts_min: 50
+  probe_ts_max: 200
+  probe_ts_reduce: mean
+  confidence_format: probability
+  confidence_out_of_range: error
+
+selection:
+  # New method tuple. Legacy selection.method is kept as an alias.
+  score_method: c3
+  select_method: tail_risk
+  scored_pool: al_runs/robotwin_al/pool_scores/c3_tail_risk_selected_scores/scored_pool.json
+  output_dir: null
+  method: tail_risk
+  budget: null
+  budget_ratio: 0.4
+  random_seed: 42
+  score_normalization: rank
+  diverse:
+    alpha: 1.0
+    beta: 0.5
+    gamma: 0.25
+    score_normalization: rank
+    n_clusters: 8
+    kmeans_n_init: 10
+
+task_prescreen:
+  enabled: true
+  output_dir: al_runs/robotwin_al/selection
+  score_method: c3
+  # RoboTwin converted manifests carry one task_name with many randomized scenes.
+  task_key_fields: [task_name]
+  candidate_pool_manifest: al_runs/robotwin_al/manifests/candidate_pool.json
+  prescreen_manifest: al_runs/robotwin_al/selection/task_prescreen_pool.json
+  # Derived by score_pool.py unless overridden:
+  #   pool_scores/{score_method}_task_prescreen_scores/scored_pool.json
+  prescreen_score_output_dir: al_runs/robotwin_al/pool_scores/c3_task_prescreen_scores
+  prescreen_scored_pool: al_runs/robotwin_al/pool_scores/c3_task_prescreen_scores/scored_pool.json
+  # Derived by selection.py unless overridden:
+  #   selection/{score_method}_{select_method}/selected_candidates.json
+  selected_candidate_manifest: al_runs/robotwin_al/selection/c3_tail_risk/selected_candidates.json
+  detailed_score_output_dir: al_runs/robotwin_al/pool_scores/c3_tail_risk_selected_scores
+  detailed_scored_pool: al_runs/robotwin_al/pool_scores/c3_tail_risk_selected_scores/scored_pool.json
+  representatives_per_task: 1
+  representative_strategy: random
+  selection_method: tail_risk
+  score_key: tail_risk_top5
+  score_direction: high
+  score_normalization: rank
+  missing_task_score: median
+  allocation_base: uniform
+  min_multiplier: 0.25
+  max_multiplier: 2.0
+  min_episodes_per_task: 1
+  max_episodes_per_task: null
+  selection_budget: null
+  selection_budget_ratio: 0.4
+  random_seed: 42
+
+warmup_retraining:
+  output_dir: al_runs/robotwin_al/retrain/evac_v1_warmup
+  replay_manifest: null  # defaults to manifests.score_method_train_split
+  train_mode: external_replay_only
+  weighting_mode: none
+  max_steps: 4000
+  # checkpoint_every: 1000  # optional: uncomment to save intermediate ckpts every N steps
+
+retraining:
+  # output_dir: auto-derived from retrain/{score_method}_{select_method}_{weighting}/
+  # weighting_mode: defaults to frame_patch, override with --weighting CLI.
+  # Oversampling is kept only as an explicit ablation: --weighting oversampling.
+  evac_train_config: configs/agibotworld/train_config_challenge_wm.yaml
+  # Main v2 protocol is selected-only. Set external_replay_plus_selected only
+  # for an explicit anti-forgetting / replay ablation.
+  train_mode: external_selected
+  allow_external_with_agibot_loader: true
+  weighting_mode: frame_patch
+  lambda_conf: 1.0
+  weight_clip_min: 1.0
+  weight_clip_max: 3.0
+  weight_warmup_steps: 1000
+  sample_weight_score_key: tail_risk_top5
+  oversample_by_weight: false
+  max_oversample_repeats: 3
+  max_steps: 4000
+  # save_best_loss defaults to train/loss_simple_epoch in the launcher.
+  # Set to null here, or pass --save_best_loss None, to disable the best-loss checkpoint.
+  # If save_every* is enabled, loss-best is merged into the periodic
+  # epoch=...-step=...(best_loss).ckpt file instead of saving a duplicate.
+  # save_best_loss: train/loss_simple_epoch
+  # save_every: false
+  # save_every_with_ewmbench: false
+  # every_eval:
+  #   max_eval_episodes: 50
+  #   start_fraction: 0.75
+  #   interval_fraction: 0.025
+  # checkpoint_every: 1000  # optional: uncomment to save intermediate ckpts every N steps
+  nproc_per_node: 1
+  # RoboTwin/Aloha trajectory conditioning geometry. This is intentionally
+  # different from the AgiBot EVAC default gripper offset (0.23).
+  traj_conditioning:
+    traj_gripper_z_offset: 0.0
+    traj_keypoint_scale: 0.1
+    traj_radius: 50
+  patch_weighting:
+    # Used only when retraining.weighting_mode is frame_patch/frame/patch_only.
+    # frame_patch builds: frame_mean(conf) + frame_patch_alpha * (conf - frame_mean(conf)).
+    frame_patch_alpha: 0.5
+    enabled: true
+    confidence_format: probability
+    risk_quantile_low: 0.05
+    risk_quantile_high: 0.95
+    risk_gamma: 1.0
+    preserve_mean: true
+    weight_clip_min: 0.5
+    weight_clip_max: 3.0
+  conf_map_missing: ones
+  conf_map_time_mode: head
+  conf_map_aligned_sampling: true
+
+evaluation:
+  # val_manifest: al_runs/{run.name}/manifests/al_val.json
+  # pred_dir: al_runs/{run.name}/retrain/{score_method}_{select_method}_{weighting}/val_infer
+  # output_dir: al_runs/{run.name}/eval/{score_method}_{select_method}_{weighting}.json
+  checkpoint: null
+  command_template: null

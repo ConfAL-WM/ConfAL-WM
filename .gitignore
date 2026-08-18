@@ -1,0 +1,44 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# Exception: upstream EVAC ships these modules as source-less pyc only
+!evac/lvdm/data/*.pyc
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Large weights (download from Hugging Face, see README)
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.bin
+checkpoints/
+
+# Data & experiment outputs
+/data/
+/datasets/
+third_party/
+logs/
+al_runs/
+baselines/results/
+baselines/cache/
+baselines/logs/
+baselines/robometer/
+baselines/Large-Reward-Models/
+baselines/PRM-as-a-Judge/
+eval/retrain_yolo/robotwin_gripper_yolo/
+eval/retrain_yolo/runs/
+eval/retrain_yolo/eval_runs/
+eval/retrain_yolo/base_models/
+
+# Misc
+.DS_Store
+*.log

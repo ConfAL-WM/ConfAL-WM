@@ -1,0 +1,146 @@
+robometer_repo: baselines/robometer
+lrm_repo: baselines/Large-Reward-Models
+prm_judge_repo: baselines/PRM-as-a-Judge
+result_dir: baselines/results
+cache_dir: baselines/cache
+log_dir: baselines/logs
+
+# ConfAL-WM scoring is launched from the normal enerverse environment.  External
+# model environments are either started as HTTP servers (Robometer/GVL/LRMs/
+# RoboReward) or invoked explicitly by python path (PRM-as-a-Judge).
+robometer_python: ~/miniconda3/envs/robometer/bin/python
+lrm_python: ~/miniconda3/envs/vlm_reward/bin/python
+prm_judge_python: ~/miniconda3/envs/prm_judge/bin/python
+
+robometer_server_url: http://localhost:8000
+# GVL now calls a cloud OpenAI-compatible VLM API instead of a local vLLM
+# Qwen2.5-VL server. Set these three (or override per-method under methods.gvl).
+# Example below: Alibaba DashScope / Bailian (OpenAI-compatible). Any OpenAI-
+# compatible VLM endpoint works — just change base_url / api_key / model_name.
+# api_key may also be supplied via the OPENAI_API_KEY (or GVL_API_KEY) env var.
+gvl_qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+gvl_qwen_api_key: 
+gvl_qwen_model_name: qwen3.7-plus
+gvl_server_url: http://localhost:8001  # legacy Gemini/OpenAI API GVL through Robometer
+lrm_server_url: http://localhost:5002
+video_fps: 1.0
+max_video_frames: 16
+timeout: 300  # per-request read timeout (s). Cloud VLM multi-image requests
+              # (15 frames + 15-item JSON) often exceed 120s under load; raise if
+              # you still see "read operation timed out". Adapter retries use this.
+
+methods:
+  random:
+    type: random
+    acquisition: random
+
+  robometer_prog:
+    type: robometer
+    mode: progress
+    acquisition: progress_low
+    backend: server
+    server_url: http://localhost:8000
+    max_frames: 16
+    use_frame_steps: false
+    run_command: false
+    command_template: "python robometer/evals/run_baseline_eval.py reward_model=rbm custom_eval.eval_types=[reward_alignment] custom_eval.use_frame_steps=true max_frames=8 # TODO: map EVAC video={video_path} task={task} output={output_path}"
+
+  robometer_pref:
+    type: robometer
+    mode: preference
+    acquisition: near_miss
+    backend: server
+    server_url: http://localhost:8000
+    max_frames: 16
+    use_frame_steps: false
+    run_command: false
+    command_template: "python robometer/evals/run_baseline_eval.py reward_model=rbm custom_eval.eval_types=[quality_preference] max_frames=8 # TODO: map EVAC video={video_path} task={task} output={output_path}"
+
+  gvl:
+    type: gvl_qwen
+    acquisition: stagnation
+    # Cloud OpenAI-compatible VLM API. Fill base_url / api_key / model_name for
+    # your provider here, or rely on the gvl_qwen_* defaults above. api_key may
+    # also come from the OPENAI_API_KEY (or GVL_API_KEY) env var. A local vLLM
+    # server still works if you point base_url at it (e.g. http://localhost:8011/v1)
+    # and set api_key to any non-empty dummy string.
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: 
+    model_name: qwen3.7-plus
+    max_frames: 15
+    max_image_side: 512
+    temperature: 0.0
+    max_tokens: 4096
+    max_retries: 3
+
+  # Legacy API-backed GVL path. This uses baselines/robometer's
+  # baseline_eval_server.py with reward_model=gvl and GEMINI_API_KEY or
+  # OPENAI_API_KEY. Keep this for closer Gemini-1.5-Pro-style comparisons.
+  gvl_api_server:
+    type: robometer_gvl
+    acquisition: stagnation
+    backend: server
+    server_url: http://localhost:8001
+    max_frames: 15
+    use_frame_steps: false
+    run_command: false
+    command_template: "python robometer/evals/run_baseline_eval.py reward_model=gvl custom_eval.eval_types=[reward_alignment] custom_eval.use_frame_steps=true max_frames=8 # TODO: map EVAC video={video_path} task={task} output={output_path}"
+
+  lrm:
+    type: lrm
+    mode: progress
+    endpoint: /compute_reward
+    batch_endpoint: /compute_rewards_batch
+    acquisition: progress_low
+    max_frames: 16
+
+  lrms:
+    type: lrm
+    mode: progress
+    endpoint: /compute_reward
+    batch_endpoint: /compute_rewards_batch
+    acquisition: progress_low
+    max_frames: 16
+
+  lrm_progress:
+    type: lrm
+    mode: progress
+    endpoint: /compute_reward
+    batch_endpoint: /compute_rewards_batch
+    acquisition: progress_low
+
+  lrm_completion:
+    type: lrm
+    mode: completion
+    endpoint: /compute_completion
+    acquisition: near_miss
+
+  lrm_contrastive:
+    type: lrm
+    mode: contrastive
+    endpoint: /compute_comparison
+    acquisition: combined
+
+  roboreward:
+    type: lrm
+    mode: roboreward
+    endpoint: /compute_roboreward
+    acquisition: combined
+    max_frames: 16
+
+  prm_judge:
+    type: prm_judge
+    acquisition: combined
+    run_command: true
+    python: ~/miniconda3/envs/prm_judge/bin/python
+    prm_path: checkpoints/PRM-as-a-Judge/Robo-Dopamine-GRM-2.0-8B-Preview
+    allow_single_view: true
+    frame_interval: 5
+    batch_size: 8
+    tensor_parallel_size: 1
+    eval_mode: backward
+    command_template: "{python} run_judge.py --output-root {output_path} # TODO: map EVAC video={video_path} task={task} to PRM eval/videos layout"
+
+  c3:
+    type: c3
+    acquisition: c3_uncertainty

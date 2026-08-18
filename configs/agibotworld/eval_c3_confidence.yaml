@@ -1,0 +1,80 @@
+# Why Confidence? Default evaluation config
+#
+# Example command:
+#   python3 eval/confidence_eval/eval_c3_confidence.py --config configs/agibotworld/eval_c3_confidence.yaml
+#
+# If the current result directory is already a standardized directory exported by the scoring pipeline:
+#   python3 eval/confidence_eval/eval_c3_confidence.py \
+#       --config configs/agibotworld/eval_c3_confidence.yaml \
+#       --standardized_root logs/c3_dec_latent_temb/results/wcm_dataset \
+#       --gt_root datasets/AgiBotWorldChallenge-2026/WorldModel/validation/gt_dataset \
+#       --output_dir logs/c3_probe_train/why_confidence_eval
+
+manifest:
+  path: null
+  split: null
+  gt_root: datasets/AgiBotWorldChallenge-2026/WorldModel/validation/gt_dataset
+  builder:
+    standardized_root: null
+    split: val
+    output_path: null
+
+output:
+  dir: logs/c3_probe_v4_dec_latent_temb/why_confidence_eval
+  save_png: true
+  save_pdf: false
+  save_per_episode_metrics_json: false
+  save_per_frame_metrics_json: false
+  qualitative_mode: single
+  qualitative_metric: patch_spearman
+
+oracle:
+  type: pixel
+
+signal_validity:
+  high_error_qs: [1, 5, 10, 20]
+  high_error_scope: episode
+  topk_overlap: true
+  frame_aggregation:
+    mode: topk_mean
+    topk_ratio: 0.10
+    quantile: 0.95
+
+calibration:
+  num_bins: 20
+  correctness_mode: hard
+  soft_correctness_mode: none
+  tau_eval:
+    mode: fixed
+    fixed_value: 0.15
+    quantile: 0.5
+    quantile_source_split: train
+  threshold_sweep:
+    enabled: true
+    values: [0.05, 0.10, 0.15, 0.20, 0.25]
+
+ood:
+  enabled: true
+  frame_score_mode: topk_mean_risk
+  frame_topk_ratio: 0.10
+  trajectory_score_mode: mean
+
+process_validity:
+  enabled: true
+  lag_max: 5
+  risk_topk_ratio: 0.10
+  low_error_quantile: 0.30
+  stable_delta_quantile: 0.30
+  frame_aggregation:
+    mode: topk_mean
+    topk_ratio: 0.10
+    quantile: 0.95
+
+bootstrap:
+  enabled: false
+  num_bootstrap: 200
+  ci: 95.0
+  seed: 0
+
+misc:
+  seed: 0

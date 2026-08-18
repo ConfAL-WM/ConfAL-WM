@@ -1,0 +1,57 @@
+# AL Evaluation Config
+# ====================
+# Optional template used by evaluate_al_round.py (--config).
+# Adjust the paths to match your project layout.
+
+project_root: .
+output_root: al_runs/robotwin_al/eval
+eval_manifest: al_runs/robotwin_al/manifests/al_val.json
+gt_video_dir: ""
+
+# --- EWMBench (external evaluator) ---
+ewmbench:
+  # Used when --metrics includes ewmbench. The ConfAL-WM adapter symlinks
+  # frame directories and decodes mp4-only sources into the eval cache.
+  repo: third_party/EWMBench
+  # Optional absolute path to the python executable of a dedicated EWMBench
+  # conda env (see README). Leave empty to use the current environment.
+  python: ""
+  # Default requested EWMBench dimensions. Without --use_ewmbench_evaluate_py,
+  # ConfAL-WM computes the supported lightweight subset (currently PSNR/SSIM)
+  # and records the remaining dimensions as skipped with reasons.
+  dimensions: [psnr, ssim, scene_consistency, trajectory_consistency, semantics, diversity]
+  decode_video_files: true
+  use_official_evaluate_py: false
+  ckpt:
+    # RoboTwin fine-tuned YOLO26s gripper detector (replaces AgiBot yolov8s-world)
+    yolo_world_ckpt: eval/retrain_yolo/runs/robotwin_gripper_yolo26s-2/weights/best.pt
+
+# --- risk metric parameters ---
+risk:
+  alpha: 1.0
+  beta: 1.0
+  cvar_q: 0.9
+
+# --- per-method checkpoint and prediction directory templates ---
+methods:
+  c3:
+    checkpoint_template: al_runs/c3_al_round1/retrain/c3_diverse_round_{round_id}/logs/c3_diverse_round_{round_id}/trainstep_checkpoints/last.ckpt
+    pred_dir_template: al_runs/c3_al_round1/eval/c3_diverse_round_{round_id}/predictions
+  random:
+    checkpoint_template: al_runs/random/round_{round_id}/checkpoint.pt
+    pred_dir_template: al_runs/random/round_{round_id}/predictions
+  gvl:
+    checkpoint_template: al_runs/gvl/round_{round_id}/checkpoint.pt
+    pred_dir_template: al_runs/gvl/round_{round_id}/predictions
+  roboreward:
+    checkpoint_template: al_runs/roboreward/round_{round_id}/checkpoint.pt
+    pred_dir_template: al_runs/roboreward/round_{round_id}/predictions
+  robometer_prog:
+    checkpoint_template: al_runs/robometer_prog/round_{round_id}/checkpoint.pt
+    pred_dir_template: al_runs/robometer_prog/round_{round_id}/predictions
+  prm_judge:
+    checkpoint_template: al_runs/prm_judge/round_{round_id}/checkpoint.pt
+    pred_dir_template: al_runs/prm_judge/round_{round_id}/predictions
+  lrm:
+    checkpoint_template: al_runs/lrm/round_{round_id}/checkpoint.pt
+    pred_dir_template: al_runs/lrm/round_{round_id}/predictions

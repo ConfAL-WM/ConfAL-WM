@@ -59,6 +59,21 @@ pip install --no-index --no-cache-dir pytorch3d \
 | `EnerV_AC_deepspeed_v0.1.pt` | [EVAC / EnerVerse-AC](https://huggingface.co/agibot-world/EnerVerse-AC) | `checkpoints/EVAC/` |
 | `open_clip_pytorch_model.bin` | [CLIP ViT-H-14](https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K) | `checkpoints/CLIP/` |
 
+### RoboTwin 2.0 dataset
+
+The pre-collected RoboTwin 2.0 data is hosted on Hugging Face:
+[RoboTwin 2.0 dataset](https://huggingface.co/datasets/TianxingChen/RoboTwin2.0/tree/main/dataset).
+We use the **`aloha-agilex_randomized_500`** variant — domain-randomized expert
+demonstrations on the Aloha-AgileX dual-arm embodiment (500 trajectories per task;
+the alternative `aloha-agilex_clean_50` configuration is not used by this pipeline).
+
+Each task ships as its own zip: `dataset/{task_name}/aloha-agilex_randomized_500.zip`
+(individual zips are ~4 GB; the full collection is ~1.4 TB, so download only the
+tasks you need). Unzip them under `datasets/RoboTwin2.0/dataset/` so the converter's
+`--raw_root` points at the per-task folders. See the
+[official RoboTwin installation docs](https://robotwin-platform.github.io/doc/usage/robotwin-install.html)
+for details.
+
 ---
 
 ## 🎯 Active Learning Pipeline (RoboTwin 2.0)

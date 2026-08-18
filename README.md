@@ -2,7 +2,7 @@
 
 ![ConfAL-WM overview](assets/introduction.png)
 
-**[Project Page](https://ConfAL-WM.github.io)** · **[🤗 Checkpoints](https://huggingface.co/anonymous89793/ConfAL-WM)** · **[🤗 Data & Evaluation Artifacts](https://huggingface.co/datasets/anonymous89793/ConfAL-WM-Dataset)**
+**[🔷 Project Page](https://ConfAL-WM.github.io)** · **[🤗 Checkpoints](https://huggingface.co/anonymous89793/ConfAL-WM)** · **[🤗 Data & Evaluation Artifacts](https://huggingface.co/datasets/anonymous89793/ConfAL-WM-Dataset)**
 
 ## Overview
 
@@ -14,7 +14,7 @@ ConfAL-WM is a confidence-guided active learning framework for action-conditione
 
 The same confidence signal is reused for evaluation and visualization: confidence heatmaps, risk maps, and oracle-error comparisons over predicted rollouts.
 
-### Released checkpoints
+### ✅ Released checkpoints
 
 | Checkpoint | Description | Link |
 |------------|-------------|------|
@@ -26,7 +26,7 @@ The same confidence signal is reused for evaluation and visualization: confidenc
 | Confidence probe · AgiBotWorld | Additional probe checkpoint | [Confidence probe AgiBotWorld.pt](https://huggingface.co/anonymous89793/ConfAL-WM/blob/main/Confidence%20probe%20AgiBotWorld.pt) |
 | YOLO · RoboTwin2.0 | Gripper detector for trajectory metrics | [YOLO RoboTwin2.0.pt](https://huggingface.co/anonymous89793/ConfAL-WM/blob/main/YOLO%20RoboTwin2.0.pt) |
 
-### Released data & evaluation artifacts
+### ✅ Released data & evaluation artifacts
 
 Precomputed artifacts that skip the most expensive inference stages (all in [ConfAL-WM-Dataset](https://huggingface.co/datasets/anonymous89793/ConfAL-WM-Dataset)):
 
@@ -40,7 +40,7 @@ Precomputed artifacts that skip the most expensive inference stages (all in [Con
 | [YOLO RoboTwin2.0 annotations](https://huggingface.co/datasets/anonymous89793/ConfAL-WM-Dataset/tree/main/YOLO%20RoboTwin2.0%20annotations) | Gripper trajectory labels + manifests |
 | [Evaluation tables & bootstrap JSON](https://huggingface.co/datasets/anonymous89793/ConfAL-WM-Dataset/tree/main/Evaluation%20tables%20and%20bootstrap%20JSON) | Mean / per-seed metrics and paired-bootstrap statistics |
 
-## Setup
+## 🔧 Setup
 
 ```bash
 conda create -n enerverse python=3.10.4
@@ -61,7 +61,7 @@ pip install --no-index --no-cache-dir pytorch3d \
 
 ---
 
-## Active Learning Pipeline (RoboTwin 2.0)
+## 🎯 Active Learning Pipeline (RoboTwin 2.0)
 
 All steps are configured through `configs/agibotworld/al_robotwin.yaml`. The method tuple `--score_method c3 --select_method <method> --weighting <mode>` must stay consistent across selection, scoring, finalization, retraining, and evaluation so output paths remain comparable.
 
@@ -169,7 +169,7 @@ When launching several jobs at once, give each a different `--gpus`; the launche
 
 ---
 
-## Evaluation
+## 📊 Evaluation
 
 Two stages: run inference with a retrained checkpoint on val episodes, then compute metrics against GT.
 
@@ -230,7 +230,7 @@ ewmbench:
 
 ---
 
-## Visualization
+## 🖼️ Visualization
 
 `visualize_val_results.py` renders per-episode GT/prediction sheets, trajectory-condition overlays, and C3 confidence / risk heatmaps from any prediction directory produced by `run_val_inference.py` or `score_pool.py`:
 
@@ -251,7 +251,7 @@ Output goes to `{pred_dir}_visualize/{episode_id}/`. With `--save_conf_map`, eac
 
 ---
 
-## RoboTwin gripper YOLO detector
+## 🤖 RoboTwin gripper YOLO detector
 
 EWMBench `trajectory_consistency` requires a gripper detector to produce `traj/traj.npy`. A RoboTwin2.0-finetuned YOLO detector is released: [YOLO RoboTwin2.0.pt](https://huggingface.co/anonymous89793/ConfAL-WM/blob/main/YOLO%20RoboTwin2.0.pt) (point `ewmbench.ckpt.yolo_world_ckpt` at it). To retrain or adapt it on your own subset (pseudo-labels are projected from action conditions):
 

@@ -42,6 +42,8 @@ Precomputed artifacts that skip the most expensive inference stages (all in [Con
 
 ## 🔧 Setup
 
+**Environment.** Our reference configuration is **Ubuntu 22.04** with **2× NVIDIA A800 (80 GB)** GPUs; all commands below assume this 2-GPU setup (see [Multi-GPU scaling](#multi-gpu-scaling) for other GPU counts).
+
 ```bash
 conda create -n enerverse python=3.10.4
 conda activate enerverse
